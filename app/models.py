@@ -1,11 +1,13 @@
 import enum
 from datetime import date, datetime, timezone
+
 from sqlalchemy import JSON, Boolean, Date, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 from app.database import Base
 
 
-def utc_now():
+def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
@@ -14,10 +16,12 @@ class UserRole(str, enum.Enum):
     TECHNICIAN = "technician"
     AUDITOR = "auditor"
 
+
 class EquipmentStatus(str, enum.Enum):
     ACTIVE = "active"
     OUT_OF_SERVICE = "out_of_service"
     RETIRED = "retired"
+
 
 class CalibrationResult(str, enum.Enum):
     PASS = "pass"
@@ -42,6 +46,7 @@ class User(Base):
     role: Mapped[UserRole] = mapped_column(Enum(UserRole))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
+
 class Equipment(Base):
     __tablename__ = "equipment"
 
@@ -53,10 +58,18 @@ class Equipment(Base):
     location: Mapped[str] = mapped_column(String(100))
     responsible_username: Mapped[str] = mapped_column(ForeignKey("users.username"))
     requires_calibration: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Empty for equipment that does not require calibration (fixtures, tooling)
     calibration_interval_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status: Mapped[EquipmentStatus] = mapped_column(Enum(EquipmentStatus), default=EquipmentStatus.ACTIVE)
-    calibrations: Mapped[list["CalibrationRecord"]] = relationship(back_populates="equipment", order_by="CalibrationRecord,calibration_date.desc()")
+    status: Mapped[EquipmentStatus] = mapped_column(
+        Enum(EquipmentStatus), default=EquipmentStatus.ACTIVE
+    )
+
+    calibrations: Mapped[list["CalibrationRecord"]] = relationship(
+        back_populates="equipment",
+        order_by=lambda: CalibrationRecord.calibration_date.desc(),
+    )
     usages: Mapped[list["EquipmentUsage"]] = relationship(back_populates="equipment")
+
 
 class CalibrationRecord(Base):
     __tablename__ = "calibration_records"
@@ -77,10 +90,12 @@ class EquipmentUsage(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     equipment_id: Mapped[int] = mapped_column(ForeignKey("equipment.id"), index=True)
+    # Plain text on purpose: this project does not depend on the lot traceability database
     lot_id: Mapped[str] = mapped_column(String(100), index=True)
     part_number: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
     operation: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    # Snapshot of the equipment calibration state at the moment of use, kept for history
     calibration_state_at_use: Mapped[CalibrationState] = mapped_column(
         Enum(CalibrationState)
     )
