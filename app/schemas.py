@@ -1,6 +1,8 @@
+from datetime import date
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from app.models import EquipmentStatus, UserRole
+from app.models import CalibrationResult, CalibrationState, EquipmentStatus, UserRole
 
 
 def check_password_bytes(value: str | None) -> str | None:
@@ -92,7 +94,7 @@ class EquipmentUpdate(BaseModel):
         return value.upper() if value is not None else None
 
 
-class EquipmentRead(BaseModel):
+class EquipmentBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
@@ -105,3 +107,26 @@ class EquipmentRead(BaseModel):
     requires_calibration: bool
     calibration_interval_days: int | None
     status: EquipmentStatus
+
+
+class EquipmentRead(EquipmentBase):
+    calibration_state: CalibrationState
+    calibration_due_date: date | None
+
+
+class CalibrationCreate(BaseModel):
+    calibration_date: date
+    result: CalibrationResult
+    certificate_filename: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class CalibrationRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    equipment_id: int
+    calibration_date: date
+    due_date: date
+    result: CalibrationResult
+    performed_by: str
+    certificate_filename: str | None

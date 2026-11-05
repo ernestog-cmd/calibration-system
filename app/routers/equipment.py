@@ -1,11 +1,19 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user, require_roles
-from app.models import Equipment, EquipmentStatus, User, UserRole
+from app.models import CalibrationState, Equipment, EquipmentStatus, User, UserRole
 from app.schemas import EquipmentCreate, EquipmentRead, EquipmentUpdate
+from app.services.calibration import (
+    get_latest_pass_due_date,
+    latest_pass_due_subquery,
+    state_filter,
+    to_equipment_read,
+)
 
 # Every endpoint needs a valid login; writing endpoints add an admin-only check below
 router = APIRouter(
@@ -58,7 +66,7 @@ def create_equipment(data: EquipmentCreate, db: Session = Depends(get_db)):
     db.add(equipment)
     db.commit()
     db.refresh(equipment)
-    return equipment
+    return to_equipment_read(equipment, due_date=None)
 
 
 @router.get("", response_model=list[EquipmentRead])
@@ -67,13 +75,16 @@ def list_equipment(
     equipment_type: str | None = None,
     location: str | None = None,
     status_filter: EquipmentStatus | None = Query(default=None, alias="status"),
+    calibration_state: CalibrationState | None = None,
     requires_calibration: bool | None = None,
     responsible_username: str | None = None,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
 ):
-    query = select(Equipment)
+    today = date.today()
+    due_expr = latest_pass_due_subquery()
+    query = select(Equipment, due_expr.label("latest_due_date"))
 
     if q:
         pattern = f"%{q}%"
@@ -92,13 +103,16 @@ def list_equipment(
         query = query.where(func.lower(Equipment.location) == location.lower())
     if status_filter:
         query = query.where(Equipment.status == status_filter)
+    if calibration_state:
+        query = query.where(state_filter(calibration_state, due_expr, today))
     if requires_calibration is not None:
         query = query.where(Equipment.requires_calibration == requires_calibration)
     if responsible_username:
         query = query.where(Equipment.responsible_username == responsible_username)
 
     query = query.order_by(Equipment.asset_code).offset(skip).limit(limit)
-    return db.scalars(query).all()
+    rows = db.execute(query).all()
+    return [to_equipment_read(equipment, due, today) for equipment, due in rows]
 
 
 # This route goes before /{equipment_id} so the two paths never get mixed up
@@ -111,12 +125,13 @@ def get_equipment_by_code(asset_code: str, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Equipment not found"
         )
-    return equipment
+    return to_equipment_read(equipment, get_latest_pass_due_date(db, equipment.id))
 
 
 @router.get("/{equipment_id}", response_model=EquipmentRead)
 def get_equipment(equipment_id: int, db: Session = Depends(get_db)):
-    return get_equipment_or_404(db, equipment_id)
+    equipment = get_equipment_or_404(db, equipment_id)
+    return to_equipment_read(equipment, get_latest_pass_due_date(db, equipment.id))
 
 
 @router.patch(
@@ -160,4 +175,4 @@ def update_equipment(
 
     db.commit()
     db.refresh(equipment)
-    return equipment
+    return to_equipment_read(equipment, get_latest_pass_due_date(db, equipment.id))
