@@ -1,6 +1,12 @@
-from datetime import date
+from datetime import date, datetime, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from app.models import CalibrationResult, CalibrationState, EquipmentStatus, UserRole
 
@@ -130,3 +136,43 @@ class CalibrationRead(BaseModel):
     result: CalibrationResult
     performed_by: str
     certificate_filename: str | None
+
+
+class UsageCreate(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    asset_code: str = Field(min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_.-]+$")
+    lot_id: str = Field(min_length=1, max_length=100)
+    part_number: str | None = Field(default=None, min_length=1, max_length=100)
+    operation: str | None = Field(default=None, min_length=1, max_length=100)
+    notes: str | None = Field(default=None, min_length=1, max_length=500)
+
+    @field_validator("asset_code", "lot_id", "part_number")
+    @classmethod
+    def uppercase_identifiers(cls, value: str | None) -> str | None:
+        return value.upper() if value is not None else None
+
+
+class UsageBase(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    equipment_id: int
+    lot_id: str
+    part_number: str | None
+    operation: str | None
+    notes: str | None
+    calibration_state_at_use: CalibrationState
+    used_at: datetime
+    recorded_by: str
+
+    @field_validator("used_at")
+    @classmethod
+    def ensure_utc(cls, value: datetime) -> datetime:
+        # SQLite returns datetimes without timezone; they are always stored in UTC
+        return value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value
+
+
+class UsageRead(UsageBase):
+    asset_code: str
+    equipment_name: str

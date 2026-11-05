@@ -15,6 +15,7 @@ from app.models import (
     UserRole,
 )
 from app.schemas import CalibrationCreate, CalibrationRead
+from app.services.audit import log_action, snapshot
 
 router = APIRouter(
     prefix="/equipment/{equipment_id}/calibrations",
@@ -77,13 +78,33 @@ def create_calibration(
         performed_by=current_user.username,
         certificate_filename=data.certificate_filename,
     )
+    db.add(record)
+    db.flush()
+    log_action(
+        db,
+        current_user.username,
+        "create",
+        "calibration",
+        record.id,
+        None,
+        snapshot(record),
+    )
 
     # A failed calibration takes the equipment out of service automatically.
     # Bringing it back is a deliberate action by an admin (PATCH status to active).
     if data.result != CalibrationResult.PASS and equipment.status == EquipmentStatus.ACTIVE:
+        previous_status = equipment.status
         equipment.status = EquipmentStatus.OUT_OF_SERVICE
+        log_action(
+            db,
+            current_user.username,
+            "auto_out_of_service",
+            "equipment",
+            equipment.id,
+            {"status": previous_status.value},
+            {"status": EquipmentStatus.OUT_OF_SERVICE.value},
+        )
 
-    db.add(record)
     db.commit()
     db.refresh(record)
     return record

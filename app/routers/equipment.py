@@ -8,6 +8,7 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_roles
 from app.models import CalibrationState, Equipment, EquipmentStatus, User, UserRole
 from app.schemas import EquipmentCreate, EquipmentRead, EquipmentUpdate
+from app.services.audit import diff, log_action, snapshot
 from app.services.calibration import (
     get_latest_pass_due_date,
     latest_pass_due_subquery,
@@ -15,7 +16,7 @@ from app.services.calibration import (
     to_equipment_read,
 )
 
-# Every endpoint needs a valid login; writing endpoints add an admin-only check below
+# Every endpoint needs a valid login; writing endpoints use the admin-only check below
 router = APIRouter(
     prefix="/equipment",
     tags=["equipment"],
@@ -52,18 +53,27 @@ def ensure_asset_code_is_free(db: Session, asset_code: str) -> None:
         )
 
 
-@router.post(
-    "",
-    response_model=EquipmentRead,
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[admin_only],
-)
-def create_equipment(data: EquipmentCreate, db: Session = Depends(get_db)):
+@router.post("", response_model=EquipmentRead, status_code=status.HTTP_201_CREATED)
+def create_equipment(
+    data: EquipmentCreate,
+    db: Session = Depends(get_db),
+    current_user: User = admin_only,
+):
     ensure_asset_code_is_free(db, data.asset_code)
     ensure_active_user(db, data.responsible_username)
 
     equipment = Equipment(**data.model_dump())
     db.add(equipment)
+    db.flush()
+    log_action(
+        db,
+        current_user.username,
+        "create",
+        "equipment",
+        equipment.id,
+        None,
+        snapshot(equipment),
+    )
     db.commit()
     db.refresh(equipment)
     return to_equipment_read(equipment, due_date=None)
@@ -134,11 +144,12 @@ def get_equipment(equipment_id: int, db: Session = Depends(get_db)):
     return to_equipment_read(equipment, get_latest_pass_due_date(db, equipment.id))
 
 
-@router.patch(
-    "/{equipment_id}", response_model=EquipmentRead, dependencies=[admin_only]
-)
+@router.patch("/{equipment_id}", response_model=EquipmentRead)
 def update_equipment(
-    equipment_id: int, data: EquipmentUpdate, db: Session = Depends(get_db)
+    equipment_id: int,
+    data: EquipmentUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = admin_only,
 ):
     equipment = get_equipment_or_404(db, equipment_id)
     changes = data.model_dump(exclude_none=True)
@@ -170,8 +181,21 @@ def update_equipment(
             )
         changes["calibration_interval_days"] = None
 
+    old_value, new_value = diff(equipment, changes)
+
     for field, value in changes.items():
         setattr(equipment, field, value)
+
+    if new_value:
+        log_action(
+            db,
+            current_user.username,
+            "update",
+            "equipment",
+            equipment.id,
+            old_value,
+            new_value,
+        )
 
     db.commit()
     db.refresh(equipment)

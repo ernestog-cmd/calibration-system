@@ -7,6 +7,7 @@ from app.dependencies import get_current_user
 from app.models import User
 from app.schemas import Token, UserRead
 from app.security import create_access_token, verify_password
+from app.services.audit import log_action
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -16,16 +17,31 @@ def login(
     form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
 ):
     user = db.get(User, form_data.username)
+
+    # Same message for every failure so the response does not reveal which usernames exist
     if (
         user is None
         or not user.is_active
         or not verify_password(form_data.password, user.hashed_password)
     ):
+        log_action(
+            db,
+            form_data.username,
+            "login_failed",
+            "auth",
+            form_data.username,
+            None,
+            {"reason": "invalid_credentials"},
+        )
+        db.commit()
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    log_action(db, user.username, "login", "auth", user.username)
+    db.commit()
 
     token = create_access_token(user.username, user.role.value)
     return Token(access_token=token, token_type="bearer")

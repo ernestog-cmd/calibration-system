@@ -7,6 +7,7 @@ from app.dependencies import get_current_user, require_roles
 from app.models import User, UserRole
 from app.schemas import UserCreate, UserRead, UserUpdate
 from app.security import hash_password
+from app.services.audit import diff, log_action, snapshot
 
 router = APIRouter(
     prefix="/users",
@@ -16,7 +17,11 @@ router = APIRouter(
 
 
 @router.post("", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def create_user(data: UserCreate, db: Session = Depends(get_db)):
+def create_user(
+    data: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     if db.get(User, data.username) is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT, detail="That username already exists"
@@ -30,6 +35,16 @@ def create_user(data: UserCreate, db: Session = Depends(get_db)):
         role=data.role,
     )
     db.add(user)
+    db.flush()
+    log_action(
+        db,
+        current_user.username,
+        "create",
+        "user",
+        user.username,
+        None,
+        snapshot(user, exclude=("hashed_password",)),
+    )
     db.commit()
     db.refresh(user)
     return user
@@ -71,11 +86,21 @@ def update_user(
                 detail="You cannot deactivate or demote your own account",
             )
 
-    if "password" in changes:
-        user.hashed_password = hash_password(changes.pop("password"))
+    password = changes.pop("password", None)
+    old_value, new_value = diff(user, changes)
+
+    # The password hash is never written to the audit log, only the fact that it changed
+    if password is not None:
+        user.hashed_password = hash_password(password)
+        new_value["password"] = "[changed]"
 
     for field, value in changes.items():
         setattr(user, field, value)
+
+    if new_value:
+        log_action(
+            db, current_user.username, "update", "user", user.username, old_value, new_value
+        )
 
     db.commit()
     db.refresh(user)
