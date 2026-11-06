@@ -40,6 +40,11 @@ export function formatDateTime(iso) {
   return iso ? new Date(iso).toLocaleString() : "";
 }
 
+export function localDateString(date = new Date()) {
+  const pad = (number) => String(number).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+}
+
 export function dataTable(headers, rows) {
   return h(
     "div",
@@ -55,4 +60,18 @@ export function dataTable(headers, rows) {
       ),
     ),
   );
+}
+
+export function openModal(title, content) {
+  const dialog = h("dialog", { class: "modal" }, h("h2", {}, title), content);
+  dialog.addEventListener("close", () => dialog.remove());
+  document.body.append(dialog);
+  dialog.showModal();
+  return { close: () => dialog.close() };
+}
+
+export function notify(text, isError = false) {
+  const toast = h("div", { class: isError ? "toast error" : "toast", role: "status" }, text);
+  document.body.append(toast);
+  setTimeout(() => toast.remove(), 4500);
 }

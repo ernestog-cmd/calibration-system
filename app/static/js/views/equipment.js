@@ -1,7 +1,16 @@
-import { api } from "../api.js";
-import { badge, dataTable, formatDateTime, h } from "../ui.js";
+import { api, downloadFile } from "../api.js";
+import {
+  badge,
+  dataTable,
+  formatDateTime,
+  h,
+  localDateString,
+  notify,
+  openModal,
+} from "../ui.js";
 
 const PAGE_SIZE = 25;
+const WRITERS = ["admin", "technician"];
 
 const STATUS_OPTIONS = [
   ["", "Any status"],
@@ -18,6 +27,12 @@ const STATE_OPTIONS = [
   ["not_required", "Not required"],
 ];
 
+const RESULT_OPTIONS = [
+  ["pass", "Pass"],
+  ["fail", "Fail"],
+  ["out_of_tolerance", "Out of tolerance"],
+];
+
 const emptyFilters = () => ({
   q: "",
   equipment_type: "",
@@ -32,16 +47,17 @@ let filters = emptyFilters();
 
 export function renderEquipment(container, user, args) {
   const [id] = args;
-  return id ? renderDetail(container, id) : renderList(container);
+  return id ? renderDetail(container, user, id) : renderList(container, user);
 }
 
+function pageHeader(title, ...actions) {
+  return h("div", { class: "page-header" }, h("h1", {}, title), h("div", { class: "actions" }, actions));
+}
+
+/* ---------- List ---------- */
+
 function textFilter(label, name) {
-  return h(
-    "label",
-    {},
-    label,
-    h("input", { name, value: filters[name], autocomplete: "off" }),
-  );
+  return h("label", {}, label, h("input", { name, value: filters[name], autocomplete: "off" }));
 }
 
 function selectFilter(label, name, options) {
@@ -57,7 +73,7 @@ function selectFilter(label, name, options) {
   );
 }
 
-async function renderList(container) {
+async function renderList(container, user) {
   const results = h("div");
   let requestId = 0;
 
@@ -133,8 +149,7 @@ async function renderList(container) {
         ),
       );
     } catch (error) {
-      if (current !== requestId) return;
-      if (error.status === 401) return;
+      if (current !== requestId || error.status === 401) return;
       results.replaceChildren(h("p", { class: "error" }, error.message));
     }
   }
@@ -172,7 +187,7 @@ async function renderList(container) {
           type: "button",
           onclick: () => {
             filters = emptyFilters();
-            renderList(container);
+            renderList(container, user);
           },
         },
         "Clear",
@@ -180,20 +195,276 @@ async function renderList(container) {
     ),
   );
 
-  container.replaceChildren(h("h1", {}, "Equipment"), h("div", { class: "card" }, form, results));
+  const newButton =
+    user.role === "admin"
+      ? h(
+          "button",
+          {
+            type: "button",
+            class: "primary",
+            onclick: () =>
+              openEquipmentForm(null, (saved) => {
+                location.hash = `#/equipment/${saved.id}`;
+              }),
+          },
+          "New equipment",
+        )
+      : null;
+
+  container.replaceChildren(pageHeader("Equipment", newButton), h("div", { class: "card" }, form, results));
   await load();
 }
+
+/* ---------- Forms ---------- */
+
+async function openEquipmentForm(equipment, onSaved) {
+  let users;
+  try {
+    users = await api("/users");
+  } catch (error) {
+    notify(error.message, true);
+    return;
+  }
+
+  const isEdit = Boolean(equipment);
+  const candidates = users.filter(
+    (user) => user.is_active || (isEdit && user.username === equipment.responsible_username),
+  );
+
+  const text = (label, name, value, extra = {}) =>
+    h("label", {}, label, h("input", { name, value: value ?? "", required: true, maxlength: 150, ...extra }));
+
+  const requires = h("input", {
+    type: "checkbox",
+    name: "requires_calibration",
+    checked: isEdit ? equipment.requires_calibration : true,
+  });
+  const interval = h("input", {
+    type: "number",
+    name: "calibration_interval_days",
+    min: 1,
+    max: 3650,
+    value: isEdit && equipment.calibration_interval_days ? equipment.calibration_interval_days : 365,
+    disabled: !requires.checked,
+  });
+  requires.addEventListener("change", () => {
+    interval.disabled = !requires.checked;
+  });
+
+  const responsible = h(
+    "select",
+    { name: "responsible_username" },
+    candidates.map((user) =>
+      h(
+        "option",
+        { value: user.username, selected: isEdit && user.username === equipment.responsible_username },
+        `${user.first_name} ${user.last_name} (${user.username})`,
+      ),
+    ),
+  );
+
+  const statusSelect = h(
+    "select",
+    { name: "status" },
+    STATUS_OPTIONS.filter(([value]) => value).map(([value, label]) =>
+      h("option", { value, selected: isEdit && equipment.status === value }, label),
+    ),
+  );
+
+  const error = h("p", { class: "error", hidden: true });
+  const save = h("button", { type: "submit", class: "primary" }, isEdit ? "Save changes" : "Create equipment");
+  const cancel = h("button", { type: "button", onclick: () => modal.close() }, "Cancel");
+
+  const form = h(
+    "form",
+    {},
+    h(
+      "div",
+      { class: "form-grid" },
+      text("Asset code", "asset_code", equipment?.asset_code, { maxlength: 50 }),
+      text("Serial number", "serial_number", equipment?.serial_number, { maxlength: 100 }),
+      h("label", { class: "wide" }, "Name", h("input", { name: "name", value: equipment?.name ?? "", required: true, maxlength: 150 })),
+      text("Type", "equipment_type", equipment?.equipment_type, { maxlength: 100 }),
+      text("Location", "location", equipment?.location, { maxlength: 100 }),
+      h("label", {}, "Responsible", responsible),
+      isEdit ? h("label", {}, "Status", statusSelect) : null,
+      h("label", { class: "wide checkbox" }, requires, "Requires calibration"),
+      h("label", { class: "wide" }, "Calibration interval (days)", interval),
+    ),
+    error,
+    h("div", { class: "form-actions" }, cancel, save),
+  );
+
+  const modal = openModal(isEdit ? `Edit ${equipment.asset_code}` : "New equipment", form);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    save.disabled = true;
+
+    const data = new FormData(form);
+    const payload = {
+      asset_code: data.get("asset_code").trim(),
+      name: data.get("name").trim(),
+      equipment_type: data.get("equipment_type").trim(),
+      serial_number: data.get("serial_number").trim(),
+      location: data.get("location").trim(),
+      responsible_username: data.get("responsible_username"),
+      requires_calibration: requires.checked,
+    };
+    if (requires.checked) payload.calibration_interval_days = Number(data.get("calibration_interval_days"));
+    if (isEdit) payload.status = data.get("status");
+
+    try {
+      const saved = await api(isEdit ? `/equipment/${equipment.id}` : "/equipment", {
+        method: isEdit ? "PATCH" : "POST",
+        json: payload,
+      });
+      modal.close();
+      notify(isEdit ? "Equipment updated" : "Equipment created");
+      onSaved(saved);
+    } catch (failure) {
+      if (failure.status === 401) return;
+      error.textContent = failure.message;
+      error.hidden = false;
+    } finally {
+      save.disabled = false;
+    }
+  });
+}
+
+function openCalibrationForm(equipment, onSaved) {
+  const today = localDateString();
+  const date = h("input", { type: "date", name: "calibration_date", value: today, max: today, required: true });
+  const result = h(
+    "select",
+    { name: "result" },
+    RESULT_OPTIONS.map(([value, label]) => h("option", { value }, label)),
+  );
+  const file = h("input", { type: "file", accept: "application/pdf,.pdf" });
+  const warning = h(
+    "p",
+    { class: "muted", hidden: true },
+    "A failed calibration takes the equipment out of service automatically.",
+  );
+  result.addEventListener("change", () => {
+    warning.hidden = result.value === "pass";
+  });
+
+  const error = h("p", { class: "error", hidden: true });
+  const save = h("button", { type: "submit", class: "primary" }, "Register calibration");
+  const cancel = h("button", { type: "button", onclick: () => modal.close() }, "Cancel");
+
+  const form = h(
+    "form",
+    {},
+    h("label", {}, "Calibration date", date),
+    h("label", {}, "Result", result),
+    warning,
+    h("label", {}, "Certificate (PDF, optional)", file),
+    error,
+    h("div", { class: "form-actions" }, cancel, save),
+  );
+
+  const modal = openModal(`Register calibration · ${equipment.asset_code}`, form);
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    error.hidden = true;
+    save.disabled = true;
+
+    let created;
+    try {
+      created = await api(`/equipment/${equipment.id}/calibrations`, {
+        method: "POST",
+        json: { calibration_date: date.value, result: result.value },
+      });
+    } catch (failure) {
+      save.disabled = false;
+      if (failure.status === 401) return;
+      error.textContent = failure.message;
+      error.hidden = false;
+      return;
+    }
+
+    modal.close();
+
+    if (file.files[0]) {
+      const body = new FormData();
+      body.append("file", file.files[0]);
+      try {
+        await api(`/equipment/${equipment.id}/calibrations/${created.id}/certificate`, {
+          method: "POST",
+          body,
+        });
+        notify("Calibration and certificate saved");
+      } catch (failure) {
+        notify(`Calibration saved, but the certificate was not uploaded: ${failure.message}`, true);
+      }
+    } else {
+      notify("Calibration saved");
+    }
+    onSaved();
+  });
+}
+
+function pickAndUpload(url, onDone) {
+  const input = h("input", { type: "file", accept: "application/pdf,.pdf" });
+  input.addEventListener("change", async () => {
+    if (!input.files[0]) return;
+    const body = new FormData();
+    body.append("file", input.files[0]);
+    try {
+      await api(url, { method: "POST", body });
+      notify("Certificate uploaded");
+      onDone();
+    } catch (failure) {
+      if (failure.status !== 401) notify(failure.message, true);
+    }
+  });
+  input.click();
+}
+
+/* ---------- Detail ---------- */
 
 function field(label, value) {
   return h("div", {}, h("dt", {}, label), h("dd", {}, value));
 }
 
-async function renderDetail(container, id) {
+function certificateCell(equipment, calibration, canWrite, refresh) {
+  const url = `/equipment/${equipment.id}/calibrations/${calibration.id}/certificate`;
+
+  if (calibration.certificate_filename) {
+    return h(
+      "button",
+      {
+        type: "button",
+        class: "link",
+        onclick: async () => {
+          try {
+            await downloadFile(url, calibration.certificate_filename);
+          } catch (failure) {
+            if (failure.status !== 401) notify(failure.message, true);
+          }
+        },
+      },
+      calibration.certificate_filename,
+    );
+  }
+  if (!canWrite) return "—";
+  return h("button", { type: "button", class: "small", onclick: () => pickAndUpload(url, refresh) }, "Upload PDF");
+}
+
+async function renderDetail(container, user, id) {
   const equipment = await api(`/equipment/${encodeURIComponent(id)}`);
   const [calibrations, usage] = await Promise.all([
     api(`/equipment/${equipment.id}/calibrations`, { params: { limit: 50 } }),
     api("/usage", { params: { asset_code: equipment.asset_code, limit: 10 } }),
   ]);
+
+  const refresh = () => renderDetail(container, user, id);
+  const canWrite = WRITERS.includes(user.role);
+  const canCalibrate = canWrite && equipment.requires_calibration && equipment.status !== "retired";
 
   const calibrationSection = !equipment.requires_calibration
     ? h("p", { class: "muted" }, "This equipment does not require calibration.")
@@ -206,7 +477,7 @@ async function renderDetail(container, id) {
             item.due_date,
             badge(item.result),
             item.performed_by,
-            item.certificate_filename || "—",
+            certificateCell(equipment, item, canWrite, refresh),
           ]),
         );
 
@@ -225,9 +496,21 @@ async function renderDetail(container, id) {
           ]),
         );
 
+  const editButton =
+    user.role === "admin"
+      ? h("button", { type: "button", onclick: () => openEquipmentForm(equipment, refresh) }, "Edit")
+      : null;
+  const calibrateButton = canCalibrate
+    ? h(
+        "button",
+        { type: "button", class: "primary", onclick: () => openCalibrationForm(equipment, refresh) },
+        "Register calibration",
+      )
+    : null;
+
   container.replaceChildren(
     h("a", { href: "#/equipment", class: "back" }, "← Back to equipment"),
-    h("h1", {}, `${equipment.asset_code} · ${equipment.name}`),
+    pageHeader(`${equipment.asset_code} · ${equipment.name}`, editButton, calibrateButton),
     h(
       "div",
       { class: "stack" },

@@ -75,6 +75,39 @@ export async function api(path, { method = "GET", params, json, form, body, auth
   return data;
 }
 
+// Files need the login token, so they cannot be plain links
+export async function downloadFile(path, filename) {
+  let response;
+  try {
+    response = await fetch(path, { headers: { Authorization: `Bearer ${session.token}` } });
+  } catch {
+    throw new ApiError(0, "Could not reach the server");
+  }
+
+  if (response.status === 401) {
+    onUnauthorized();
+    throw new ApiError(401, "Your session has expired");
+  }
+  if (!response.ok) {
+    let data = null;
+    try {
+      data = await response.json();
+    } catch {
+      // not JSON, the generic message is used
+    }
+    throw new ApiError(response.status, errorMessage(data, response.status));
+  }
+
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export async function login(username, password) {
   const data = await api("/auth/login", {
     method: "POST",
