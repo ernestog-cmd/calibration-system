@@ -2,7 +2,8 @@ fastapi
 uvicorn
 sqlalchemy
 alembic
-pytest
 bcrypt
 PyJWT
 python-multipart
+APScheduler
+tzdata
