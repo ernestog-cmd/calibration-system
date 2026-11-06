@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Calibration System</title>
+  <link rel="stylesheet" href="/ui/css/styles.css">
+</head>
+<body>
+  <section id="login-view" class="login" hidden>
+    <form id="login-form" class="card login-card">
+      <h1>Calibration System</h1>
+      <p class="muted">Sign in to continue</p>
+      <label>Username
+        <input id="login-username" autocomplete="username" required>
+      </label>
+      <label>Password
+        <input id="login-password" type="password" autocomplete="current-password" required>
+      </label>
+      <p id="login-error" class="error" role="alert" hidden></p>
+      <button id="login-button" type="submit" class="primary">Sign in</button>
+    </form>
+  </section>
+
+  <div id="app-view" class="shell" hidden>
+    <aside class="sidebar">
+      <div class="brand">Calibration System</div>
+      <nav id="nav"></nav>
+      <div class="sidebar-footer">
+        <div id="user-info" class="user-info"></div>
+        <button id="logout-button" type="button">Sign out</button>
+      </div>
+    </aside>
+    <main class="content">
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <script type="module" src="/ui/js/app.js"></script>
+</body>
+</html>
