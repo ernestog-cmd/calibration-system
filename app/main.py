@@ -17,6 +17,7 @@ from app.routers import (
     usage,
     users,
 )
+from app.services.bootstrap import create_first_admin, maybe_seed_demo_data
 from app.services.scheduler import start_scheduler
 
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +27,8 @@ STATIC_DIR = Path(__file__).parent / "static"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    create_first_admin()
+    maybe_seed_demo_data()
     scheduler = start_scheduler()
     yield
     if scheduler is not None:
@@ -38,6 +41,11 @@ app = FastAPI(title="Calibration System", lifespan=lifespan)
 @app.get("/", include_in_schema=False)
 def root():
     return RedirectResponse("/ui/")
+
+
+@app.get("/health", tags=["system"])
+def health():
+    return {"status": "ok"}
 
 
 app.include_router(auth.router)

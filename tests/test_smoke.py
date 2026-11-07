@@ -1,3 +1,8 @@
+def test_health_endpoint_is_public(client):
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
 
 def test_openapi_schema_builds_and_lists_every_router(client):
     response = client.get("/openapi.json")
@@ -5,6 +10,7 @@ def test_openapi_schema_builds_and_lists_every_router(client):
 
     paths = response.json()["paths"]
     for expected in (
+        "/health",
         "/auth/login",
         "/users",
         "/equipment",
