@@ -1,16 +1,21 @@
 import { ApiError, login, logout, restoreSession, session, setUnauthorizedHandler } from "./api.js";
 import { h } from "./ui.js";
+import { renderAlerts } from "./views/alerts.js";
+import { renderAudit } from "./views/audit.js";
 import { renderDashboard } from "./views/dashboard.js";
 import { renderEquipment } from "./views/equipment.js";
+import { renderReports } from "./views/reports.js";
+import { renderUsage } from "./views/usage.js";
+import { renderUsers } from "./views/users.js";
 
 const NAV = [
   { key: "dashboard", label: "Dashboard", render: renderDashboard },
   { key: "equipment", label: "Equipment", render: renderEquipment },
-  { key: "usage", label: "Lot usage" },
-  { key: "alerts", label: "Alerts" },
-  { key: "reports", label: "Reports" },
-  { key: "audit", label: "Audit log", roles: ["admin", "auditor"] },
-  { key: "users", label: "Users", roles: ["admin"] },
+  { key: "usage", label: "Lot usage", render: renderUsage },
+  { key: "alerts", label: "Alerts", render: renderAlerts },
+  { key: "reports", label: "Reports", render: renderReports },
+  { key: "audit", label: "Audit log", render: renderAudit, roles: ["admin", "auditor"] },
+  { key: "users", label: "Users", render: renderUsers, roles: ["admin"] },
 ];
 
 const loginView = document.getElementById("login-view");

@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Calibration System</title>
-  <link rel="stylesheet" href="/ui/css/styles.css">
+  <link rel="stylesheet" href="/ui/css/theme.css">
+  <link rel="stylesheet" href="/ui/css/search.css">
 </head>
 <body>
   <section id="login-view" class="login" hidden>
@@ -23,19 +24,26 @@
   </section>
 
   <div id="app-view" class="shell" hidden>
-    <aside class="sidebar">
-      <div class="brand">Calibration System</div>
-      <nav id="nav"></nav>
-      <div class="sidebar-footer">
-        <div id="user-info" class="user-info"></div>
-        <button id="logout-button" type="button">Sign out</button>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <a class="brand" href="#/dashboard">Calibration System</a>
+        <nav id="nav" aria-label="Main"></nav>
+        <form id="global-search" class="global-search" role="search">
+          <input id="global-search-input" type="search" placeholder="Find by code  ( / )"
+                 aria-label="Find equipment by code" autocomplete="off" maxlength="50">
+        </form>
+        <div class="topbar-user">
+          <span id="user-info" class="user-info"></span>
+          <button id="logout-button" type="button" class="small">Sign out</button>
+        </div>
       </div>
-    </aside>
+    </header>
     <main class="content">
       <div id="view"></div>
     </main>
   </div>
 
   <script type="module" src="/ui/js/app.js"></script>
+  <script type="module" src="/ui/js/search.js"></script>
 </body>
 </html>
